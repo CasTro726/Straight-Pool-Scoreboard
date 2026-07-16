@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>14-1 ストレートプール スコアボード</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+:root{
+  --radius: 10px;
+  --surface-1: #0f3d2c;
+  --surface-2: #ffffff;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-accent: #6366f1;
+  --bg-accent: #eef2ff;
+  --text-accent: #4338ca;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+  --bg-success: #ecfdf5;
+  --text-success: #047857;
+  --border-success: #6ee7b7;
+  --bg-danger: #fef2f2;
+  --text-danger: #b91c1c;
+  --border-danger: #fca5a5;
+  --bg-warning: #fffbeb;
+  --text-warning: #b45309;
+  --border-warning: #fcd34d;
+}
+*{box-sizing:border-box;}
+body{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  background:var(--surface-1);
+  color:var(--text-primary);
+  margin:0;
+  padding:20px 14px 60px;
+}
+#app{max-width:520px;margin:0 auto;}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.btn-num{aspect-ratio:1;border-radius:50%;border:0;background:transparent;padding:0;cursor:pointer;color:var(--text-primary);overflow:visible;}
+.btn-num:active{transform:scale(0.96)}
+.btn-num:disabled{opacity:0.3;cursor:default;}
+.btn-num.continue .ball-face{box-shadow: 0 0 0 3px #10b981, inset -3px -3px 6px rgba(0,0,0,0.25), inset 2px 2px 4px rgba(255,255,255,0.4);}
+.ball-face{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow: inset -3px -3px 6px rgba(0,0,0,0.28), inset 2px 2px 4px rgba(255,255,255,0.5), 0 1px 2px rgba(0,0,0,0.25);}
+.ball-number{background:#ffffff;color:#18181b;width:50%;height:50%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700;box-shadow:0 0 0 1px rgba(0,0,0,0.12);}
+.side-panel{border-radius:12px;padding:1rem;flex:1;border:0.5px solid var(--border);transition:background .15s,border-color .15s;background:var(--surface-2);}
+.side-panel.player-0{background:#93c5fd;border-color:#3b82f6;}
+.side-panel.player-1{background:#fdba74;border-color:#ea580c;}
+.side-active{border:4px solid var(--border-accent);background:var(--bg-accent);box-shadow:0 0 0 3px rgba(99,102,241,0.25);}
+.near-goal{background:#fce7f3;border-color:#f472b6;}
+.near-goal.side-active{border:4px solid #ec4899;background:#fce7f3;box-shadow:0 0 0 3px rgba(236,72,153,0.25);}
+.side-inactive{opacity:0.5;}
+.action-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 8px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-2);cursor:pointer;font-size:13px;color:var(--text-primary)}
+.action-btn:active{transform:scale(0.97)}
+.action-btn:disabled{opacity:0.4;cursor:default}
+input[type=text],select{width:100%}
+</style>
+</head>
+<body>
+<h1 style="text-align:center;font-size:16px;font-weight:600;margin:0 0 1.25rem;color:#ecfdf5;">14-1 ストレートプール スコアボード(試作)</h1>
+<div id="app"></div>
+<script>
+let state = null;
+let history = [];
+
+function freshState(){
+  return {
+    phase:'setup',
+    players:[
+      {name:'プレイヤー1', target:100, score:0},
+      {name:'プレイヤー2', target:100, score:0}
+    ],
+    active:0,
+    tableRackCount:0,
+    rackHasEntry:false,
+    log:[],
+    endType:null,
+    winnerIdx:null
+  };
+}
+state = freshState();
+
+function snapshot(){
+  history.push(JSON.stringify(state));
+  if(history.length>200) history.shift();
+}
+function undo(){
+  if(history.length===0) return;
+  state = JSON.parse(history.pop());
+  render();
+}
+
+function targetOptions(selected){
+  let opts='';
+  for(let v=20; v<=240; v+=20){
+    opts += `<option value="${v}" ${v===selected?'selected':''}>${v}点</option>`;
+  }
+  return opts;
+}
+
+function startGame(){
+  const n1 = document.getElementById('p1name').value.trim() || 'プレイヤー1';
+  const n2 = document.getElementById('p2name').value.trim() || 'プレイヤー2';
+  const t1 = parseInt(document.getElementById('p1target').value,10);
+  const t2 = parseInt(document.getElementById('p2target').value,10);
+  state.players[0].name=n1; state.players[0].target=t1;
+  state.players[1].name=n2; state.players[1].target=t2;
+  state.phase='playing';
+  history=[];
+  render();
+}
+
+function pressBasket(k){
+  if(k < state.tableRackCount) return;
+  snapshot();
+  const idx = state.active;
+  const delta = k - state.tableRackCount;
+  const isContinue = (k === 14);
+  state.players[idx].score += delta;
+  state.log.push({playerIdx: idx, points: delta, tag:null, threeFoulPenalty:false, isContinue});
+  if(isContinue){
+    state.tableRackCount = 0;
+    state.rackHasEntry = false;
+  } else {
+    state.tableRackCount = k;
+    state.rackHasEntry = true;
+    state.active = idx===0 ? 1 : 0;
+  }
+  render();
+}
+
+function currentNet(e){
+  return e.points - (e.tag==='foul' ? 1 : 0) - (e.threeFoulPenalty ? 15 : 0);
+}
+
+const BALL_COLORS = {
+  1:{type:'solid', color:'#eab308'},
+  2:{type:'solid', color:'#2563eb'},
+  3:{type:'solid', color:'#dc2626'},
+  4:{type:'solid', color:'#7c3aed'},
+  5:{type:'solid', color:'#f97316'},
+  6:{type:'solid', color:'#16a34a'},
+  7:{type:'solid', color:'#7f1d1d'},
+  8:{type:'solid', color:'#18181b'},
+  9:{type:'stripe', color:'#eab308'},
+  10:{type:'stripe', color:'#2563eb'},
+  11:{type:'stripe', color:'#dc2626'},
+  12:{type:'stripe', color:'#7c3aed'},
+  13:{type:'stripe', color:'#f97316'},
+  14:{type:'stripe', color:'#16a34a'}
+};
+
+function ballFaceHTML(k){
+  if(k===0){
+    return `<span class="ball-face" style="background:#ffffff;"><span class="ball-number" style="background:transparent;box-shadow:none;color:#71717a;">0</span></span>`;
+  }
+  const info = BALL_COLORS[k];
+  if(info.type==='solid'){
+    return `<span class="ball-face" style="background:${info.color};"><span class="ball-number">${k}</span></span>`;
+  }
+  return `<span class="ball-face" style="background:linear-gradient(to bottom, #ffffff 0%, #ffffff 28%, ${info.color} 28%, ${info.color} 72%, #ffffff 72%, #ffffff 100%);"><span class="ball-number">${k}</span></span>`;
+}
+
+function computeStats(){
+  const currentRun=[0,0], highRun=[0,0], innings=[0,0];
+  const shotsMade=[0,0], shotsAttempted=[0,0];
+  const safetyCount=[0,0], safetyResolved=[0,0], safetySuccess=[0,0];
+
+  for(let i=0;i<state.log.length;i++){
+    const e = state.log[i];
+    const pi = e.playerIdx;
+    currentRun[pi] += e.points;
+
+    if(e.tag==='safety'){
+      shotsMade[pi] += e.points;
+      shotsAttempted[pi] += e.points;
+      safetyCount[pi]++;
+      if(i+1 < state.log.length){
+        safetyResolved[pi]++;
+        if(state.log[i+1].points===0) safetySuccess[pi]++;
+      }
+    } else {
+      shotsMade[pi] += e.points;
+      shotsAttempted[pi] += e.points + (e.isContinue ? 0 : 1);
+    }
+
+    if(!e.isContinue){
+      innings[pi]++;
+      highRun[pi] = Math.max(highRun[pi], currentRun[pi]);
+      currentRun[pi] = 0;
+    }
+  }
+  highRun[0] = Math.max(highRun[0], currentRun[0]);
+  highRun[1] = Math.max(highRun[1], currentRun[1]);
+
+  return [0,1].map(pi => {
+    const inningsCount = innings[pi];
+    const average = inningsCount>0 ? state.players[pi].score / inningsCount : 0;
+    const shootPct = shotsAttempted[pi]>0 ? shotsMade[pi]/shotsAttempted[pi] : null;
+    const safetyPct = safetyResolved[pi]>0 ? safetySuccess[pi]/safetyResolved[pi] : null;
+    return {
+      innings: inningsCount,
+      average,
+      highRun: highRun[pi],
+      shotsMade: shotsMade[pi],
+      shotsAttempted: shotsAttempted[pi],
+      shootPct,
+      safetyCount: safetyCount[pi],
+      safetyResolved: safetyResolved[pi],
+      safetyPct
+    };
+  });
+}
+
+function getFoulStreak(playerIdx, uptoIndex){
+  let streak=0;
+  for(let i=uptoIndex; i>=0; i--){
+    const e = state.log[i];
+    if(e.playerIdx!==playerIdx) continue;
+    if(e.isContinue) continue;
+    if(e.tag==='foul'){ streak++; } else { break; }
+  }
+  return streak;
+}
+
+function tagLast(tag){
+  if(state.log.length===0) return;
+  const i = state.log.length-1;
+  const last = state.log[i];
+  if(last.isContinue) return;
+  snapshot();
+  const e = state.log[i];
+  const p = state.players[e.playerIdx];
+  const oldNet = currentNet(e);
+  if(e.tag===tag){
+    e.tag = null;
+    e.threeFoulPenalty = false;
+  } else {
+    e.tag = tag;
+    e.threeFoulPenalty = false;
+    if(tag==='foul'){
+      const streak = getFoulStreak(e.playerIdx, i);
+      if(streak>=3) e.threeFoulPenalty = true;
+    }
+  }
+  const newNet = currentNet(e);
+  p.score += (newNet - oldNet);
+  render();
+}
+
+function endMatch(type){
+  snapshot();
+  state.phase='ended';
+  state.endType = type;
+  if(type==='win'){
+    const idx = state.active;
+    const delta = state.players[idx].target - state.players[idx].score;
+    if(delta > 0){
+      state.log.push({playerIdx: idx, points: delta, tag:null, threeFoulPenalty:false, isContinue:false, isFinal:true});
+    }
+    state.players[idx].score = state.players[idx].target;
+    state.winnerIdx = idx;
+  }
+  render();
+}
+
+function resetAll(){
+  state = freshState();
+  history=[];
+  render();
+}
+
+function exportLog(){
+  const lines = [];
+  lines.push('14-1 ストレートプール 試合記録');
+  lines.push('日時: ' + new Date().toLocaleString('ja-JP'));
+  lines.push(`${state.players[0].name}（目標 ${state.players[0].target}点） vs ${state.players[1].name}（目標 ${state.players[1].target}点）`);
+  lines.push('');
+  lines.push('No,プレイヤー,得点,種別,その時点の得点');
+  const runningScores = [0,0];
+  state.log.forEach((e, i)=>{
+    const net = currentNet(e);
+    runningScores[e.playerIdx]+=net;
+    let tagLabel = e.isContinue ? 'ラック継続' : (e.tag==='foul' ? (e.threeFoulPenalty ? 'ファウル(3連続-15込)' : 'ファウル') : (e.tag==='safety' ? 'セーフティ' : '通常'));
+    lines.push(`${i+1},${state.players[e.playerIdx].name},${net},${tagLabel},${runningScores[e.playerIdx]}`);
+  });
+  lines.push('');
+  lines.push(`最終得点: ${state.players[0].name} ${state.players[0].score}点 / ${state.players[1].name} ${state.players[1].score}点`);
+  lines.push('試合結果: ' + (state.endType==='win' ? `取り切り終了（勝者: ${state.players[state.winnerIdx].name}）` : '途中終了'));
+  lines.push('');
+  const stats = computeStats();
+  const fmtPct = (v) => v===null ? '-' : Math.round(v*100) + '%';
+  [0,1].forEach(pi=>{
+    const s = stats[pi];
+    lines.push(`${state.players[pi].name}: イニング数 ${s.innings} / アベレージ ${s.average.toFixed(2)} / ハイラン ${s.highRun} / シュート率 ${fmtPct(s.shootPct)} / セーフティ成功率 ${fmtPct(s.safetyPct)}`);
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'match_' + Date.now() + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function renderSetup(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div style="max-width:480px;margin:0 auto;">
+      <div style="margin-bottom:1.25rem;">
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">プレイヤー1の名前</label>
+        <input type="text" id="p1name" value="プレイヤー1" style="height:36px;padding:0 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);"/>
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin:10px 0 4px;">目標点数</label>
+        <select id="p1target" style="height:36px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);">${targetOptions(100)}</select>
+      </div>
+      <div style="margin-bottom:1.5rem;">
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">プレイヤー2の名前</label>
+        <input type="text" id="p2name" value="プレイヤー2" style="height:36px;padding:0 10px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);"/>
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin:10px 0 4px;">目標点数</label>
+        <select id="p2target" style="height:36px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);">${targetOptions(100)}</select>
+      </div>
+      <button class="action-btn" style="width:100%;background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent);" onclick="startGame()"><i class="ti ti-player-play" aria-hidden="true"></i>試合を開始</button>
+    </div>
+  `;
+}
+
+function renderPlaying(){
+  const app = document.getElementById('app');
+  const p0 = state.players[0], p1 = state.players[1];
+  const activeIdx = state.active;
+  const basketButtons = [];
+  for(let k=0;k<=14;k++){
+    const disabled = k < state.tableRackCount;
+    const isContinueBtn = k===14;
+    basketButtons.push(`<button class="btn-num ${isContinueBtn?'continue':''}" onclick="pressBasket(${k})" ${disabled?'disabled':''}>${ballFaceHTML(k)}</button>`);
+  }
+  const lastEntry = state.log.length ? state.log[state.log.length-1] : null;
+  const canTag = lastEntry && !lastEntry.isContinue;
+  const near0 = (p0.target - p0.score) <= 20 && (p0.target - p0.score) > 0;
+  const near1 = (p1.target - p1.score) <= 20 && (p1.target - p1.score) > 0;
+  app.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:1rem;">
+      <div class="side-panel player-0 ${activeIdx===0?'side-active':'side-inactive'} ${near0?'near-goal':''}">
+        <p style="font-size:14px;color:var(--text-secondary);margin:0 0 4px;">${p0.name}</p>
+        <p style="font-size:28px;font-weight:500;margin:0;">${p0.score}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0;">目標 ${p0.target}点</p>
+      </div>
+      <div class="side-panel player-1 ${activeIdx===1?'side-active':'side-inactive'} ${near1?'near-goal':''}">
+        <p style="font-size:14px;color:var(--text-secondary);margin:0 0 4px;">${p1.name}</p>
+        <p style="font-size:28px;font-weight:500;margin:0;">${p1.score}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0;">目標 ${p1.target}点</p>
+      </div>
+    </div>
+
+    <div style="text-align:center;background:var(--bg-accent);color:var(--text-accent);border-radius:var(--radius);padding:10px;margin-bottom:1rem;font-size:15px;font-weight:500;">
+      <i class="ti ti-target-arrow" aria-hidden="true" style="vertical-align:-3px;margin-right:6px;"></i>${state.players[activeIdx].name} のターン
+    </div>
+
+    <p style="text-align:center;font-size:12px;color:#a7f3d0;margin:0 0 10px;">ラック消化: ${state.tableRackCount}/14(プレイヤー間で共有・14で継続)</p>
+
+    <p style="font-size:12px;color:#a7f3d0;margin:0 0 6px;">バスケット内の合計球数を押してください</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px;">
+      ${basketButtons.join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px;">
+      <button class="action-btn" style="${lastEntry && lastEntry.tag==='foul' ? 'background:var(--bg-danger);color:var(--text-danger);border-color:var(--border-danger);':''}" onclick="tagLast('foul')" ${!canTag?'disabled':''}>
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>直前のターンをファウルにする
+      </button>
+      <button class="action-btn" style="${lastEntry && lastEntry.tag==='safety' ? 'background:var(--bg-accent);color:var(--text-accent);border-color:var(--border-accent);':''}" onclick="tagLast('safety')" ${!canTag?'disabled':''}>
+        <i class="ti ti-shield" aria-hidden="true"></i>直前のターンをセーフティにする
+      </button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:1.5rem;">
+      <button class="action-btn" onclick="undo()"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>戻る</button>
+      <button class="action-btn" onclick="endMatch('abandon')"><i class="ti ti-player-stop" aria-hidden="true"></i>途中終了</button>
+      <button class="action-btn" style="background:var(--bg-warning);color:var(--text-warning);border-color:var(--border-warning);" onclick="endMatch('win')"><i class="ti ti-flag" aria-hidden="true"></i>取り切り終了</button>
+    </div>
+
+    <details>
+      <summary style="font-size:13px;color:#a7f3d0;cursor:pointer;">イニング履歴(${state.log.length}件)</summary>
+      <div style="max-height:180px;overflow-y:auto;font-size:12px;margin-top:8px;background:var(--surface-2);border-radius:var(--radius);padding:8px 10px;">
+        ${state.log.slice().reverse().map((e,ri)=>{
+          const i = state.log.length-1-ri;
+          const tagText = e.isContinue ? 'ラック継続' : (e.tag==='foul' ? (e.threeFoulPenalty ? 'ファウル(3連続 -15)' : 'ファウル') : (e.tag==='safety' ? 'セーフティ':''));
+          return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:0.5px solid var(--border);">
+            <span>#${i+1} ${state.players[e.playerIdx].name}</span>
+            <span>${currentNet(e)}点 ${tagText? '('+tagText+')':''}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </details>
+  `;
+}
+
+function renderEnded(){
+  const app = document.getElementById('app');
+  const p0 = state.players[0], p1 = state.players[1];
+  const winner = state.endType==='win' ? state.players[state.winnerIdx] : null;
+  const stats = computeStats();
+  const fmtPct = (v) => v===null ? '-' : Math.round(v*100) + '%';
+  const fmtAvg = (v) => v.toFixed(2);
+  app.innerHTML = `
+    <div style="text-align:center;margin-bottom:1.5rem;">
+      <p style="font-size:18px;font-weight:500;margin:0 0 4px;color:#ecfdf5;">${state.endType==='win' ? '試合終了(取り切り)' : '試合終了(途中終了)'}</p>
+      ${winner ? `<p style="font-size:20px;font-weight:500;margin:0;color:#fde047;"><i class="ti ti-trophy" aria-hidden="true" style="vertical-align:-3px;margin-right:6px;"></i>${winner.name} の勝利</p>` : ''}
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:1.5rem;">
+      <div class="side-panel player-0 ${state.endType==='win' && state.winnerIdx===0 ? 'side-active' : ''}">
+        <p style="font-size:14px;color:var(--text-secondary);margin:0 0 4px;">${p0.name}</p>
+        <p style="font-size:28px;font-weight:500;margin:0;">${p0.score}</p>
+      </div>
+      <div class="side-panel player-1 ${state.endType==='win' && state.winnerIdx===1 ? 'side-active' : ''}">
+        <p style="font-size:14px;color:var(--text-secondary);margin:0 0 4px;">${p1.name}</p>
+        <p style="font-size:28px;font-weight:500;margin:0;">${p1.score}</p>
+      </div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem;font-size:13px;color:#ecfdf5;">
+      <thead>
+        <tr style="border-bottom:0.5px solid rgba(255,255,255,0.3);">
+          <th style="text-align:left;padding:6px 4px;color:#a7f3d0;font-weight:500;"></th>
+          <th style="text-align:right;padding:6px 4px;color:#a7f3d0;font-weight:500;">${p0.name}</th>
+          <th style="text-align:right;padding:6px 4px;color:#a7f3d0;font-weight:500;">${p1.name}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:0.5px solid rgba(255,255,255,0.15);">
+          <td style="padding:6px 4px;color:#d1fae5;">イニング数</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${stats[0].innings}</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${stats[1].innings}</td>
+        </tr>
+        <tr style="border-bottom:0.5px solid rgba(255,255,255,0.15);">
+          <td style="padding:6px 4px;color:#d1fae5;">アベレージ</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtAvg(stats[0].average)}</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtAvg(stats[1].average)}</td>
+        </tr>
+        <tr style="border-bottom:0.5px solid rgba(255,255,255,0.15);">
+          <td style="padding:6px 4px;color:#d1fae5;">ハイラン</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${stats[0].highRun}</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${stats[1].highRun}</td>
+        </tr>
+        <tr style="border-bottom:0.5px solid rgba(255,255,255,0.15);">
+          <td style="padding:6px 4px;color:#d1fae5;">シュート率</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtPct(stats[0].shootPct)}</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtPct(stats[1].shootPct)}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 4px;color:#d1fae5;">セーフティ成功率</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtPct(stats[0].safetyPct)}</td>
+          <td style="text-align:right;padding:6px 4px;color:#ecfdf5;">${fmtPct(stats[1].safetyPct)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+      <button class="action-btn" onclick="exportLog()"><i class="ti ti-download" aria-hidden="true"></i>記録をtxtで書き出す</button>
+      <button class="action-btn" onclick="resetAll()"><i class="ti ti-refresh" aria-hidden="true"></i>新しい試合</button>
+    </div>
+  `;
+}
+
+function render(){
+  if(state.phase==='setup') renderSetup();
+  else if(state.phase==='playing') renderPlaying();
+  else renderEnded();
+}
+
+render();
+</script>
+</body>
+</html>
